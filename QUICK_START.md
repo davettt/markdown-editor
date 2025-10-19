@@ -5,14 +5,11 @@ Get the Markdown Editor & Live Previewer running in 5 minutes. Edit markdown fil
 ## Installation
 
 ```bash
-# Install dependencies (includes dev tools)
+# Install dependencies
 npm install
 
-# Setup pre-commit hooks
-npx husky install
-
-# Verify everything works
-npm run validate
+# Start the app
+npm run dev
 ```
 
 ## Configuration
@@ -127,14 +124,14 @@ markdown-editor/
 ## Next Steps
 
 - Read **README.md** for full documentation
-- Read **SECURITY.md** for security architecture and threat model
+- Read **SECURITY.md** for security considerations (local-only use)
 - Read **README.md "Usage & Forking"** section if you want to customize
 
 ## Need Help?
 
 1. Check README.md FAQ/Troubleshooting
 2. Review SECURITY.md for security questions
-3. Check CONTRIBUTING.md for development questions
+3. Read README.md "Usage & Forking" if you want to customize
 
 ---
 

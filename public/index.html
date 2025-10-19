@@ -66,7 +66,11 @@
       <!-- Footer -->
       <footer class="footer">
         <p>Local-only markdown editor with live preview. All files stay on your computer.</p>
-        <p><a href="https://github.com/davettt/markdown-editor" target="_blank" rel="noopener">View on GitHub</a></p>
+        <p>
+          <a href="https://github.com/davettt/markdown-editor" target="_blank" rel="noopener"
+            >View on GitHub</a
+          >
+        </p>
       </footer>
     </div>
 
@@ -96,18 +100,42 @@
 
     <!-- File Browser Modal -->
     <div id="fileBrowserModal" class="modal hidden">
-      <div class="modal-content" style="max-width: 600px; max-height: 80vh; overflow-y: auto;">
+      <div class="modal-content" style="max-width: 600px; max-height: 80vh; overflow-y: auto">
         <h2>Select Markdown File</h2>
         <input
           type="text"
           id="fileSearchInput"
           placeholder="Search files... (e.g., spec, readme)"
-          style="width: 100%; padding: var(--spacing-sm); border: 1px solid var(--color-border); border-radius: var(--border-radius); margin-bottom: var(--spacing-md); font-family: var(--font-family-base); font-size: 0.875rem;"
+          style="
+            width: 100%;
+            padding: var(--spacing-sm);
+            border: 1px solid var(--color-border);
+            border-radius: var(--border-radius);
+            margin-bottom: var(--spacing-md);
+            font-family: var(--font-family-base);
+            font-size: 0.875rem;
+          "
         />
-        <div id="fileList" style="max-height: 55vh; overflow-y: auto; border: 1px solid var(--color-border); border-radius: var(--border-radius); padding: var(--spacing-md);">
+        <div
+          id="fileList"
+          style="
+            max-height: 55vh;
+            overflow-y: auto;
+            border: 1px solid var(--color-border);
+            border-radius: var(--border-radius);
+            padding: var(--spacing-md);
+          "
+        >
           <p>Loading files...</p>
         </div>
-        <div style="display: flex; gap: var(--spacing-md); margin-top: var(--spacing-lg); justify-content: flex-end;">
+        <div
+          style="
+            display: flex;
+            gap: var(--spacing-md);
+            margin-top: var(--spacing-lg);
+            justify-content: flex-end;
+          "
+        >
           <button id="closeBrowserBtn" class="btn btn-secondary">Cancel</button>
         </div>
       </div>

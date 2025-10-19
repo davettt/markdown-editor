@@ -25,33 +25,24 @@ A production-ready, security-first Node.js application for editing markdown file
 - ✅ **Dark mode support** - Automatic system preference detection
 - ✅ **Pre-commit hooks** - Code quality validated automatically (for developers)
 
-## Security Features
+## Security Considerations
 
-This application is built with security as a top priority:
+This is a **local-only application** designed for trusted environments. See **SECURITY.md** for full details.
 
-### File Access Security
+### What We Protect Against
 
-- **Directory whitelisting** - Only allow access to specific directories
-- **Path traversal prevention** - Normalize and validate all file paths
-- **File type restrictions** - Only markdown files (`.md`, `.markdown`, `.txt`)
-- **File size limits** - Prevent large file handling (configurable)
-- **Access control** - File readability/writeability checks before operations
+- **Directory traversal attacks** - Path validation prevents accessing files outside allowed directories
+- **XSS injection** - Content sanitization and HTML escaping prevent script injection
+- **Credential leakage** - `.env` is git-ignored, secrets never committed
+- **Dependency vulnerabilities** - npm audit checks prevent known vulnerabilities
 
-### Web Security
+### What We Don't Protect Against
 
-- **Helmet.js** - Security HTTP headers (CSP, X-Frame-Options, etc.)
-- **XSS prevention** - HTML escaping for user content
-- **CORS disabled** - Local-only by default (configurable)
-- **Rate limiting** - Basic in-memory rate limiting
-- **Input validation** - All API inputs validated and sanitized
+- Network attacks (app is local-only by design)
+- Multi-user scenarios (single-user local tool)
+- OS-level exploits (update your operating system)
 
-### Code Security
-
-- **ESLint security plugin** - Detects common security patterns
-- **npm audit** - Dependency vulnerability scanning
-- **No eval()** - Never uses dynamic code execution
-- **Type safety** - TypeScript strict mode prevents common bugs
-- **Safe logging** - Never logs sensitive paths or content
+**Read SECURITY.md for complete information.**
 
 ## Quick Start
 
@@ -69,11 +60,8 @@ cd markdown-editor
 # Install dependencies
 npm install
 
-# Setup pre-commit hooks
-npx husky install
-
-# Test the setup
-npm run validate
+# Start the app
+npm run dev
 ```
 
 ### Configuration
@@ -208,22 +196,24 @@ npm run format:check
 npm run security:audit
 ```
 
-### Pre-commit Hooks
+### Code Quality Before Committing
 
-Pre-commit hooks run automatically before every git commit:
-
-```
-1. Type checking (tsc)
-2. Linting (eslint) - must pass with zero warnings
-3. Formatting check (prettier)
-4. Security audit (npm audit)
-```
-
-To bypass hooks (not recommended):
+Before committing changes, run the validation checks:
 
 ```bash
-git commit --no-verify
+# Run all checks (type, lint, format, security)
+npm run validate
+
+# Auto-fix issues
+npm run lint:fix && npm run format
 ```
+
+This runs:
+
+- Type checking (tsc)
+- Linting (eslint) - must pass with zero warnings
+- Formatting check (prettier)
+- Security audit (npm audit)
 
 ### Making Changes
 
