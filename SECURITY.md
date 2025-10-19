@@ -1,406 +1,151 @@
-# Security Architecture
+# Security Considerations
 
-This document outlines the security measures implemented in the Markdown Editor.
+## Important: Local-Only Use
 
-## Threat Model
+This application is **designed for local-only operation** on a trusted machine. It is **not** designed for:
 
-### Threats We Protect Against
+- Public internet deployment
+- Multi-user environments
+- Untrusted networks
+- Production servers handling sensitive data
 
-1. **Directory Traversal Attacks** - Accessing files outside allowed directories
-2. **XSS (Cross-Site Scripting)** - Injecting malicious scripts via markdown
-3. **Unauthorized File Access** - Reading/writing files without permission
-4. **Resource Exhaustion** - Large files or rate limit abuse
-5. **Credential Leakage** - Exposing secrets in logs or errors
-6. **Dependency Vulnerabilities** - Using vulnerable libraries
-
-### Threats Out of Scope
-
-1. **Local privilege escalation** - Assumes attacker has same user permissions
-2. **Physical attacks** - Computer theft, BIOS modification, etc.
-3. **Operating system exploits** - OS-level vulnerabilities
-4. **Network attacks** - Man-in-the-middle (local-only by design)
-5. **Social engineering** - Tricking users into running malicious code
-
-## Security Implementation
-
-### 1. File Access Control
-
-**Goal:** Prevent unauthorized file access through directory traversal or bypasses.
-
-**Implementation:**
-
-```typescript
-// Path normalization and validation
-const normalizedPath = normalize(resolve(filePath));
-
-// Whitelist checking
-const isAllowed = config.allowedDirectories.some((allowedDir) => {
-  const normalizedAllowed = normalize(resolve(allowedDir));
-  return normalizedPath.startsWith(normalizedAllowed + "/");
-});
-
-// Type checking
-if (!config.allowedExtensions.includes(extension)) {
-  return false;
-}
-```
-
-**Why:**
-
-- `normalize()` - Removes `..` and `.` path components
-- `resolve()` - Converts to absolute paths
-- Directory whitelisting - Only specific directories are accessible
-- Extension whitelist - Only markdown files are allowed
-- Access permission checks - Uses OS-level permissions
-
-**Testing:**
-
-```bash
-# Should be rejected (outside allowed dir)
-POST /api/file/read
-"../../../etc/passwd"
-
-# Should be rejected (wrong extension)
-POST /api/file/read
-"/Users/you/file.txt"
-
-# Should fail (permission denied)
-POST /api/file/read
-"/root/.ssh/id_rsa"
-```
-
-### 2. XSS Prevention
-
-**Goal:** Prevent injection of malicious scripts through markdown content.
-
-**Implementation:**
-
-```javascript
-// HTML escaping
-function escapeHtml(text) {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-// Use textContent instead of innerHTML where possible
-element.textContent = userInput; // Safe
-element.innerHTML = userInput; // Dangerous!
-```
-
-**Why:**
-
-- `textContent` - Browser treats as plain text, escapes automatically
-- No eval() - Never dynamically execute user code
-- Content Security Policy - Restricts script execution origin
-- Server-side sanitization - Removes null bytes and dangerous chars
-
-**Markdown Rendering:**
-
-- Server-side: Content is never parsed server-side
-- Client-side: Only basic markdown parsing (no HTML parsing)
-- Library handling: If using marked.js, ensure HTML is sanitized
-
-### 3. Input Validation
-
-**Goal:** Reject malformed or malicious input early.
-
-**Implementation:**
-
-```typescript
-export function validateFilePathInput(input: unknown): string | null {
-  // Type check
-  if (typeof input !== "string") return null;
-
-  // Length check
-  const trimmed = input.trim();
-  if (trimmed.length === 0 || trimmed.length > 500) return null;
-
-  // Dangerous character check
-  if (trimmed.includes("\0") || trimmed.includes("\n")) return null;
-
-  return trimmed;
-}
-```
-
-**Layers:**
-
-1. Type validation - Ensure input is correct type
-2. Length validation - Prevent extremely long paths
-3. Character validation - Reject null bytes, newlines
-4. Format validation - Path normalization catches issues
-
-### 4. HTTP Security Headers
-
-**Goal:** Prevent common browser-based attacks.
-
-**Implementation:** Helmet.js with custom configuration
-
-```typescript
-app.use(
-  helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-      },
-    },
-    frameguard: { action: "deny" },
-    noSniff: true,
-    xssFilter: true,
-  })
-);
-```
-
-**Headers Set:**
-
-- `Content-Security-Policy` - Control resource loading
-- `X-Frame-Options` - Prevent clickjacking
-- `X-Content-Type-Options` - Prevent MIME sniffing
-- `X-XSS-Protection` - XSS protection in older browsers
-- `Strict-Transport-Security` - Force HTTPS (not applicable locally)
-
-### 5. Rate Limiting
-
-**Goal:** Prevent DoS attacks and abuse.
-
-**Implementation:** In-memory rate limiting
-
-```typescript
-const RATE_LIMIT_WINDOW = 60000; // 1 minute
-const RATE_LIMIT_MAX_REQUESTS = 100; // per minute
-
-// Store records per IP, cleanup old entries
-```
-
-**Approach:**
-
-- Per-IP tracking - Count requests by source IP
-- Time window - 1-minute rolling window
-- Cleanup - Removes expired entries to save memory
-- Response - Returns 429 Too Many Requests
-
-**Limitations:**
-
-- In-memory only - Not suitable for cluster deployments
-- IP-based - May not work behind proxies
-
-### 6. Code Quality & Security Scanning
-
-**Goal:** Catch security issues and bugs automatically.
-
-**Tools:**
-
-- **ESLint + security plugin** - Detects dangerous patterns
-- **TypeScript strict mode** - Prevents many runtime errors
-- **npm audit** - Checks dependency vulnerabilities
-- **Pre-commit hooks** - Enforces checks before commits
-
-**Examples Caught:**
-
-```typescript
-// ESLint would flag:
-eval(userInput); // Security issue
-const obj = {};
-obj[userInput] = value; // Object injection risk
-child_process.exec(userInput); // Command injection risk
-```
-
-### 7. Error Handling & Logging
-
-**Goal:** Don't leak sensitive information in errors/logs.
-
-**Implementation:**
-
-```typescript
-function logSecurityEvent(event: string, details?: Record<string, unknown>): void {
-  const safeDetails = {
-    ...details,
-    filePath: "[REDACTED]",
-    content: "[REDACTED]",
-  };
-  console.error(`[SECURITY] ${event}`, safeDetails);
-}
-```
-
-**Approach:**
-
-- Never log file paths
-- Never log file content
-- Log error types, not error messages that might contain paths
-- Use `[REDACTED]` placeholders for security events
-
-**Error Responses:**
-
-```typescript
-// Client receives generic error
-res.status(500).json({ error: "Failed to read file" });
-
-// Server logs detailed error
-console.error("File read error:", actualError);
-```
-
-### 8. Environment Configuration
-
-**Goal:** Keep secrets separate from code.
-
-**Implementation:** `.env` file with defaults
-
-```env
-ALLOWED_DIRECTORIES=/Users/you/Documents,/Users/you/Projects
-MAX_FILE_SIZE=5242880
-PORT=3000
-NODE_ENV=development
-```
-
-**Best Practices:**
-
-- `.env` is in `.gitignore` - Never committed
-- `.env.example` shows structure without secrets
-- Validate on startup - Fail fast if misconfigured
-- Type-safe config - TypeScript checks config structure
-
-## Dependency Security
-
-### Included Libraries
-
-**Express.js**
-
-- Well-maintained, widely used
-- Regular security updates
-- Known for good security practices
-
-**Helmet.js**
-
-- Specifically designed for HTTP security
-- Sets recommended security headers
-- Actively maintained
-
-**marked.js**
-
-- Popular markdown parser
-- Configurable HTML rendering
-- Consider using with DOMPurify for extra safety
-
-**DOMPurify**
-
-- Maintained by Cure53 (security firm)
-- Specifically for XSS prevention
-- Battle-tested on many websites
-
-### Keeping Dependencies Updated
-
-```bash
-# Check for outdated packages
-npm outdated
-
-# Update to latest versions
-npm update
-
-# Install latest major versions (breaking changes)
-npm install express@latest
-
-# Run security audit
-npm audit
-
-# Fix security issues automatically where possible
-npm audit fix
-```
-
-### Vulnerability Reporting
-
-When npm audit finds vulnerabilities:
-
-1. **Understand the vulnerability**
-
-   ```bash
-   npm audit | grep -A 5 "CRITICAL\|HIGH"
-   ```
-
-2. **Check if it affects this app**
-
-   - Is it in a production dependency?
-   - Can it be triggered with local-only use?
-
-3. **Update or patch**
-
-   ```bash
-   # Update affected package
-   npm update vulnerable-package
-
-   # If no fix available, use npm audit fix --force
-   npm audit fix --force
-   ```
-
-## Security Testing
-
-### Manual Testing Checklist
-
-- [ ] Try path traversal: `../../etc/passwd`
-- [ ] Try symlink following: load a symlink outside allowed dir
-- [ ] Try JavaScript injection in markdown
-- [ ] Try extremely long file paths
-- [ ] Try null bytes in file path
-- [ ] Try loading files without read permissions
-- [ ] Try saving to files without write permissions
-- [ ] Check Rate limiting: send 150 requests rapidly
-- [ ] Check CSP headers in browser DevTools
-- [ ] Verify no secrets in console logs
-
-### Automated Testing
-
-```bash
-# Run all checks
-npm run validate
-
-# ESLint security plugin
-npm run lint
-
-# TypeScript strict mode
-npm run type-check
-
-# Dependency audit
-npm run security:audit
-```
-
-## Deployment Considerations
-
-### Production Checklist
-
-- [ ] Set `NODE_ENV=production`
-- [ ] Review `ALLOWED_DIRECTORIES`
-- [ ] Increase `MAX_FILE_SIZE` if needed
-- [ ] Run `npm ci --production` (locked versions)
-- [ ] Run `npm audit` before deploying
-- [ ] Keep Node.js updated
-- [ ] Monitor logs for security events
-- [ ] Regular backups of important files
-- [ ] Consider using process manager (PM2, systemd)
-
-### Not Recommended
-
-- ❌ Exposing to network (port forwarding)
-- ❌ Using over unencrypted connection
-- ❌ Running as root
-- ❌ Disabling security checks
-- ❌ Using in untrusted environments
-
-## Security Audit Timeline
-
-| Date       | Finding                | Resolution                             |
-| ---------- | ---------------------- | -------------------------------------- |
-| 2025-10-19 | Initial implementation | All core security features implemented |
-| -          | -                      | -                                      |
-
-## References
-
-- [OWASP Top 10](https://owasp.org/www-project-top-ten/)
-- [Express.js Security Best Practices](https://expressjs.com/en/advanced/best-practice-security.html)
-- [Node.js Security Best Practices](https://nodejs.org/en/docs/guides/nodejs-security/)
-- [CWE Top 25](https://cwe.mitre.org/top25/)
-- [Helmet.js Documentation](https://helmetjs.github.io/)
+If you deploy this beyond `localhost`, you assume all associated risks.
 
 ---
 
-**Questions or concerns? Please report security issues responsibly.**
+## What We Protect Against
+
+This application implements protections for realistic local-use scenarios:
+
+### 1. File Access Control
+
+**Threat:** Accidentally or maliciously reading/writing files outside intended directories
+
+**Protection:**
+
+- Directory whitelisting - Only specific directories are accessible
+- Path normalization - `../../../etc/passwd` attacks are blocked
+- Extension whitelist - Only `.md`, `.markdown`, `.txt` files allowed
+- OS-level permission checks - System enforces read/write permissions
+
+**How to use safely:**
+
+- Set `ALLOWED_DIRECTORIES` in `.env` to only directories you want to edit
+- Review your `.env` configuration before running the app
+
+### 2. XSS Prevention
+
+**Threat:** Malicious markdown or HTML injection when rendering content
+
+**Protection:**
+
+- Content sanitization - Removes null bytes and dangerous characters
+- HTML escaping - Text content is never interpreted as HTML
+- No eval() - Never executes dynamic code
+- CSP headers - Browser restricts script sources to same-origin
+
+**Example:** If markdown contains `<script>alert('xss')</script>`, it renders as literal text, not executable code.
+
+### 3. Credential Protection
+
+**Threat:** Accidentally committing `.env` file with local paths or configuration
+
+**Protection:**
+
+- `.env` is in `.gitignore` - Never committed to git
+- `.env.example` contains only placeholders - Shows structure without secrets
+- Environment validation - App fails fast if misconfigured
+
+**How to use safely:**
+
+- Never commit `.env` file
+- Use `.env.example` as a template
+- Check `git status` before committing to verify no `.env` is staged
+
+### 4. Dependency Vulnerabilities
+
+**Threat:** Using packages with known security vulnerabilities
+
+**Protection:**
+
+- npm audit - Checks dependencies for known vulnerabilities
+- Pre-commit hooks - Runs audit before commits
+- Regular updates - Dependencies are up-to-date
+
+**How to use safely:**
+
+- Run `npm audit` regularly
+- Update packages with `npm update`
+- Review changes before upgrading major versions
+
+---
+
+## What We Don't Protect Against
+
+These threats are **out of scope** for a local application:
+
+- **Local privilege escalation** - If attacker has shell access, they already have file access
+- **Physical attacks** - Computer theft, BIOS modification, etc.
+- **OS exploits** - Operating system vulnerabilities (update your OS instead)
+- **Network attacks** - Man-in-the-middle, DDoS (app is local-only by design)
+- **User mistakes** - Configuring `ALLOWED_DIRECTORIES` to `/` or root
+- **Malicious markdown** - If you load untrusted `.md` files, review them first
+
+---
+
+## Usage Checklist
+
+Before using this application:
+
+- [ ] You trust the machine it runs on
+- [ ] You understand it's local-only
+- [ ] You've configured `.env` with appropriate directories
+- [ ] You keep Node.js and dependencies updated
+- [ ] You don't commit `.env` file
+- [ ] You understand `.claude/` is local-only (not committed)
+
+---
+
+## If You Deploy This Elsewhere
+
+If you ignore the "local-only" warning and deploy this:
+
+**You must:**
+
+- Run as non-root user
+- Use HTTPS only (set up reverse proxy)
+- Implement authentication (not included)
+- Run behind a firewall
+- Set `NODE_ENV=production`
+- Monitor logs for security events
+- Keep all dependencies updated
+
+**You shouldn't:**
+
+- Expose the app directly to the internet
+- Assume the provided rate limiting is sufficient
+- Assume path validation alone prevents all attacks
+- Use this for multi-user scenarios
+
+**Recommendation:** Don't do this. This tool is meant for local use. If you need a web-based editor, use a dedicated solution designed for that.
+
+---
+
+## Reporting Security Issues
+
+If you find a security issue **in this local tool**:
+
+1. Report it privately (don't use public issues)
+2. Email details to the maintainer
+3. Include steps to reproduce
+4. Wait for response before public disclosure
+
+For most issues in a local app, the fix is: "Don't run untrusted code on your machine" or "Configure `.env` correctly."
+
+---
+
+## Summary
+
+This is a **well-intentioned local tool** with reasonable security practices, not a hardened production application. Use it locally, fork it, customize it. If you need something more, use a purpose-built solution.
+
+**Use at your own risk.** 🔒
