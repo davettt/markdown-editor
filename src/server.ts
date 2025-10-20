@@ -311,7 +311,7 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction): void 
 // Server Start
 // ============================================================================
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.info(`Server running on http://localhost:${PORT}`);
   console.info(`Environment: ${NODE_ENV}`);
   console.info(`Session ID: ${appState.sessionId}`);
@@ -319,12 +319,21 @@ app.listen(PORT, () => {
 });
 
 // Handle graceful shutdown
-process.on("SIGTERM", () => {
-  console.info("SIGTERM received, shutting down gracefully");
-  process.exit(0);
-});
+const gracefulShutdown = (signal: string) => {
+  console.info(`${signal} received, shutting down gracefully`);
 
-process.on("SIGINT", () => {
-  console.info("SIGINT received, shutting down gracefully");
-  process.exit(0);
-});
+  // Stop accepting new connections
+  server.close(() => {
+    console.info("Server closed, all connections terminated");
+    process.exit(0);
+  });
+
+  // Force exit if graceful shutdown takes too long (30 seconds)
+  setTimeout(() => {
+    console.warn("Graceful shutdown timeout exceeded, forcing exit");
+    process.exit(1);
+  }, 30000);
+};
+
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));

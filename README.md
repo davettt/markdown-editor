@@ -1,6 +1,6 @@
 # Markdown Editor & Live Previewer
 
-A production-ready, security-first Node.js application for editing markdown files with a live split-pane preview. Edit markdown on the left, see rendered HTML on the right in real-time. Runs entirely on your local machine with zero external data transmission.
+A secure, local-only Node.js application for editing markdown files with a live split-pane preview. Edit markdown on the left, see rendered HTML on the right in real-time. Runs entirely on your local machine with zero external data transmission.
 
 ## Features
 
