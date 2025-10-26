@@ -13,6 +13,7 @@ import {
   logSecurityEvent,
 } from "./utils/security.js";
 import { VERSION } from "./version.js";
+import os from "os";
 
 // Load environment variables from .env file
 dotenv.config();
@@ -308,32 +309,224 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction): void 
 });
 
 // ============================================================================
+// Lock File Management
+// ============================================================================
+
+const LOCK_FILE_PATH = path.join(process.cwd(), ".markdown-editor.lock");
+
+interface LockFileData {
+  pid: number;
+  port: number;
+  timestamp: number;
+  hostname: string;
+}
+
+/**
+ * Checks if a process with the given PID is running
+ */
+function isProcessRunning(pid: number): boolean {
+  try {
+    // process.kill with signal 0 doesn't actually kill, just checks if process exists
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Attempts to acquire the lock file
+ * @throws Error if another instance is already running
+ */
+async function acquireLock(port: number): Promise<void> {
+  try {
+    // Check if lock file exists
+    const lockContent = await fs.readFile(LOCK_FILE_PATH, "utf-8");
+    const lockData: LockFileData = JSON.parse(lockContent);
+
+    // Check if the process is still running
+    if (isProcessRunning(lockData.pid)) {
+      throw new Error(
+        `Another instance is already running (PID: ${lockData.pid}, Port: ${lockData.port})\n` +
+          `Started at: ${new Date(lockData.timestamp).toLocaleString()}\n` +
+          `To stop it, run: kill ${lockData.pid}\n` +
+          `Or use Ctrl+C in the terminal where it's running.`
+      );
+    }
+
+    // Lock file exists but process is dead - clean up stale lock
+    console.info(`Cleaning up stale lock file from PID ${lockData.pid}`);
+    await fs.unlink(LOCK_FILE_PATH);
+  } catch (error) {
+    // If file doesn't exist, that's fine - we can create it
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      // Re-throw if it's not a "file not found" error
+      throw error;
+    }
+  }
+
+  // Create new lock file
+  const lockData: LockFileData = {
+    pid: process.pid,
+    port,
+    timestamp: Date.now(),
+    hostname: os.hostname(),
+  };
+
+  await fs.writeFile(LOCK_FILE_PATH, JSON.stringify(lockData, null, 2), "utf-8");
+  console.info(`Lock file created (PID: ${process.pid})`);
+}
+
+/**
+ * Releases the lock file
+ */
+async function releaseLock(): Promise<void> {
+  try {
+    await fs.unlink(LOCK_FILE_PATH);
+    console.info("Lock file removed");
+  } catch (error) {
+    // Ignore errors when removing lock file during shutdown
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.warn("Failed to remove lock file:", error);
+    }
+  }
+}
+
+// ============================================================================
+// Port Detection Utility
+// ============================================================================
+
+/**
+ * Starts the server on the first available port starting from preferredPort
+ * @param preferredPort - The port to try first
+ * @param maxAttempts - Maximum number of ports to try (default: 10)
+ * @returns An object with the server instance and the actual port used
+ * @throws Error if no available port is found within maxAttempts
+ */
+async function startServerOnAvailablePort(
+  preferredPort: number,
+  maxAttempts: number = 10
+): Promise<{ server: ReturnType<typeof app.listen>; port: number }> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const port = preferredPort + attempt;
+
+    try {
+      const server = await new Promise<ReturnType<typeof app.listen>>((resolve, reject) => {
+        const srv = app
+          .listen(port)
+          .once("listening", () => {
+            resolve(srv);
+          })
+          .once("error", (err: NodeJS.ErrnoException) => {
+            reject(err);
+          });
+      });
+
+      return { server, port };
+    } catch (err) {
+      const error = err as NodeJS.ErrnoException;
+
+      if (error.code === "EADDRINUSE") {
+        if (attempt < maxAttempts - 1) {
+          console.info(`Port ${port} is in use, trying ${port + 1}...`);
+          continue;
+        } else {
+          throw new Error(
+            `Could not find an available port after trying ${maxAttempts} ports (${preferredPort}-${preferredPort + maxAttempts - 1})`
+          );
+        }
+      }
+
+      // For other errors, rethrow immediately
+      throw error;
+    }
+  }
+
+  throw new Error("Unexpected error in startServerOnAvailablePort");
+}
+
+// ============================================================================
 // Server Start
 // ============================================================================
 
-const server = app.listen(PORT, () => {
-  console.info(`Server running on http://localhost:${PORT}`);
-  console.info(`Environment: ${NODE_ENV}`);
-  console.info(`Session ID: ${appState.sessionId}`);
-  console.info(`Allowed directories: ${securityConfig.allowedDirectories.join(", ")}`);
-});
+(async () => {
+  try {
+    // Check for existing lock before starting server
+    try {
+      // Do a preliminary check without acquiring lock
+      const lockContent = await fs.readFile(LOCK_FILE_PATH, "utf-8");
+      const lockData: LockFileData = JSON.parse(lockContent);
 
-// Handle graceful shutdown
-const gracefulShutdown = (signal: string) => {
-  console.info(`${signal} received, shutting down gracefully`);
+      if (isProcessRunning(lockData.pid)) {
+        console.error(
+          `\nAnother instance is already running!\n` +
+          `  PID: ${lockData.pid}\n` +
+          `  Port: ${lockData.port}\n` +
+          `  Started: ${new Date(lockData.timestamp).toLocaleString()}\n\n` +
+          `To stop the running instance:\n` +
+          `  - Press Ctrl+C in the terminal where it's running, or\n` +
+          `  - Run: kill ${lockData.pid}\n`
+        );
+        process.exit(1);
+      }
+    } catch (error) {
+      // Lock file doesn't exist or is invalid - proceed with startup
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        // Log but don't fail on JSON parse errors (stale/corrupt lock)
+        console.warn("Warning: Invalid lock file detected, will clean up");
+      }
+    }
 
-  // Stop accepting new connections
-  server.close(() => {
-    console.info("Server closed, all connections terminated");
-    process.exit(0);
-  });
+    const { server, port } = await startServerOnAvailablePort(PORT);
 
-  // Force exit if graceful shutdown takes too long (30 seconds)
-  setTimeout(() => {
-    console.warn("Graceful shutdown timeout exceeded, forcing exit");
+    // Acquire lock after successfully starting server
+    await acquireLock(port);
+
+    console.info(`Server running on http://localhost:${port}`);
+    if (port !== PORT) {
+      console.info(`Note: Preferred port ${PORT} was in use, using port ${port} instead`);
+    }
+    console.info(`Environment: ${NODE_ENV}`);
+    console.info(`Session ID: ${appState.sessionId}`);
+    console.info(`Allowed directories: ${securityConfig.allowedDirectories.join(", ")}`);
+
+    // Handle graceful shutdown
+    const gracefulShutdown = async (signal: string) => {
+      console.info(`${signal} received, shutting down gracefully`);
+
+      // Release lock file
+      await releaseLock();
+
+      // Stop accepting new connections
+      server.close(() => {
+        console.info("Server closed, all connections terminated");
+        process.exit(0);
+      });
+
+      // Force exit if graceful shutdown takes too long (30 seconds)
+      setTimeout(() => {
+        console.warn("Graceful shutdown timeout exceeded, forcing exit");
+        process.exit(1);
+      }, 30000);
+    };
+
+    process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+    process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+
+    // Also clean up lock on unexpected exits
+    process.on("exit", () => {
+      try {
+        // Synchronous cleanup on exit
+        const lockExists = require("fs").existsSync(LOCK_FILE_PATH);
+        if (lockExists) {
+          require("fs").unlinkSync(LOCK_FILE_PATH);
+        }
+      } catch (error) {
+        // Ignore errors during exit cleanup
+      }
+    });
+  } catch (error) {
+    console.error("Failed to start server:", error instanceof Error ? error.message : error);
     process.exit(1);
-  }, 30000);
-};
-
-process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
-process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+  }
+})();

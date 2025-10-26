@@ -44,6 +44,9 @@ tmp/
 temp/
 *.tmp
 
+# Lock files
+.markdown-editor.lock
+
 # Security audit
 npm-audit.json
 
